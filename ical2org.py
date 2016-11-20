@@ -1,16 +1,19 @@
-#!/usr/bin/python2.7
+#!/usr/bin/env python
 
 from __future__ import print_function
 import sys
 from math import floor
 from datetime import date, datetime, timedelta, tzinfo
-from icalendar import Calendar
+import icalendar as ical
 from pytz import timezone, utc
 
-# Change here your local timezone
+# Default local timezone. The "VTIMEZONE" section of the calendar will
+# update this entry.
 LOCAL_TZ = timezone("Europe/Paris")
+
 # Window length in days (left & right from current time). Has to be positive.
 WINDOW = 90
+
 # leave empty if you don't want to attach any tag to recurring events
 RECUR_TAG = ":RECURRING:"
 
@@ -28,13 +31,18 @@ def get_datetime(dt):
     '''Given a datetime, return it. If argument is date, convert it to a local datetime'''
     if isinstance(dt, datetime):
         return dt
+    elif isinstance(dt, date):
+        return datetime(year = dt.year, month = dt.month, day = dt.day, tzinfo = LOCAL_TZ)
     else:
-        # d is date. Being a naive date, let's suppose it is in local
-        # timezone.  Unfortunately using the tzinfo argument of the standard
-        # datetime constructors ''does not work'' with pytz for many
-        # timezones, so create first a utc datetime, and convert to local timezone
-        aux_dt = datetime(year = dt.year, month = dt.month, day = dt.day, tzinfo = utc)
-        return aux_dt.astimezone(LOCAL_TZ)
+        # The given ical date may have a timezone. If not, use the
+        # default for the calendar.
+        if "TZID" in dt.params:
+            tz = timezine(dt.params["TZID"])
+        else:
+            tz = LOCAL_TZ
+
+        aux_dt = datetime(year = dt.year, month = dt.month, day = dt.day, tzinfo = tz)
+        return aux_dt
 
 def add_delta_dst(dt, delta):
     '''Add a timedelta to a datetime, adjusting DST when appropriate'''
@@ -56,12 +64,14 @@ def generate_event_iterator(comp, timeframe_start, timeframe_end):
     # Note: timeframe_start and timeframe_end are in UTC
     if comp.name != 'VEVENT': return []
     if 'RRULE' in comp:
-        return {
-            'WEEKLY' : EventRecurDaysIter(7, comp, timeframe_start, timeframe_end),
-            'DAILY' : EventRecurDaysIter(1, comp, timeframe_start, timeframe_end),
-            'MONTHLY' : [],
-            'YEARLY' : EventRecurYearlyIter(comp, timeframe_start, timeframe_end)
-            }[ comp['RRULE']['FREQ'][0] ]
+        if comp['RRULE']['FREQ'][0] == 'WEEKLY':
+            return EventRecurDaysIter(7, comp, timeframe_start, timeframe_end)
+        elif comp['RRULE']['FREQ'][0] == 'DAILY':
+            return EventRecurDaysIter(1, comp, timeframe_start, timeframe_end)
+        elif comp['RRULE']['FREQ'][0] == 'MONTHLY':
+            return list()
+        elif comp['RRULE']['FREQ'][0] == 'YEARLY':
+            return EventRecurYearlyIter(comp, timeframe_start, timeframe_end)
     else:
         return EventSingleIter(comp, timeframe_start, timeframe_end)
 
@@ -96,15 +106,35 @@ class EventSingleIter:
 
 class EventRecurDaysIter:
     '''Iterator for daily-based recurring events (daily, weekly).'''
+    day_num = dict( MO = 0,
+                    TU = 1,
+                    WE = 2,
+                    TH = 3,
+                    FR = 4,
+                    SA = 5,
+                    SU = 6)
+
     def __init__(self, days, comp, timeframe_start, timeframe_end):
         self.ev_start = get_datetime(comp['DTSTART'].dt)
+
         self.ev_end = get_datetime(comp['DTEND'].dt)
         self.duration = self.ev_end - self.ev_start
         self.is_count = False
+        self.day_list = list()
+
+        if 'BYDAY' in comp['RRULE']:
+            self.day_list = [ self.day_num[day_name] for day_name in comp['RRULE']['BYDAY'] ]
+            delta_days = 1
+        elif comp['RRULE']['FREQ'][0] == 'WEEKLY':
+            self.day_list = [0, 1, 2, 3, 4, 5, 6]
+            delta_days = 7
+        else:
+            self.day_list = self.ev_start.weekday()
+            delta_days = 1
+
         if 'COUNT' in comp['RRULE']:
             self.is_count = True
             self.count = comp['RRULE']['COUNT'][0]
-        delta_days = days
         if 'INTERVAL' in comp['RRULE']:
             delta_days *= comp['RRULE']['INTERVAL'][0]
         self.delta = timedelta(delta_days)
@@ -137,6 +167,8 @@ class EventRecurDaysIter:
             raise StopIteration
         event_aux = self.current
         self.current = add_delta_dst(self.current, self.delta)
+        while self.current.weekday() not in self.day_list:
+            self.current = add_delta_dst(self.current, self.delta)
         return (event_aux, event_aux.tzinfo.normalize(event_aux + self.duration), 1)
 
     def next_count(self):
@@ -200,28 +232,35 @@ class EventRecurYearlyIter:
         if event_aux < self.start: return self.next()
         return (event_aux, event_aux.tzinfo.normalize(event_aux + self.duration), 1)
 
-if len(sys.argv) < 2:
-    fh = sys.stdin
-else:
-    fh = open(sys.argv[1],'rb')
+def convert_ical(ics):
+    """Convert icalendar export to org-mode.
 
-if len(sys.argv) > 2:
-    fh_w = open(sys.argv[2],'wb')
-else:
-    fh_w = sys.stdout
+    Arguments:
+    - ics -- the slup'd ics file.
 
-try:
-    cal = Calendar.from_ical(fh.read())
-except:
-    print("ERROR parsing ical file", file=sys.stderr)
-    exit(1)
-    pass
+    Returns:
+    - org -- org-mode text.
 
-now = datetime.now(utc)
-start = now - timedelta( days = WINDOW)
-end = now + timedelta( days = WINDOW)
-for comp in cal.walk():
+    """
     try:
+        cal = ical.Calendar.from_ical(ics)
+    except Exception as e:
+        print("ERROR parsing ical file", file=sys.stderr)
+        raise(e)
+
+    org_lines = list()
+
+    now = datetime.now(utc)
+    start = now - timedelta( days = WINDOW)
+    end = now + timedelta( days = WINDOW)
+
+    for comp in cal.walk():
+        # Set the default timezone.
+        if isinstance(comp, ical.Timezone):
+            global LOCAL_TZ
+            LOCAL_TZ = timezone(comp["TZID"])
+            continue
+
         event_iter = generate_event_iterator(comp, start, end)
         for comp_start, comp_end, rec_event in event_iter:
             SUMMARY = ""
@@ -230,20 +269,36 @@ for comp in cal.walk():
                 SUMMARY = SUMMARY.replace('\\,', ',')
             if not len(SUMMARY):
                 SUMMARY = "(No title)"
-            fh_w.write("* {}".format(SUMMARY))
+            org_lines.append("* {}".format(SUMMARY))
             if rec_event and len(RECUR_TAG):
-                fh_w.write(" {}\n".format(RECUR_TAG))
-            fh_w.write("\n")
+                org_lines.append(" {}\n".format(RECUR_TAG))
+            org_lines.append("\n")
             if isinstance(comp["DTSTART"].dt, datetime):
-                fh_w.write("  {}--{}\n".format(orgDatetime(comp_start), orgDatetime(comp_end)))
+                org_lines.append("  {}--{}\n".format(orgDatetime(comp_start), orgDatetime(comp_end)))
             else:  # all day event
-                fh_w.write("  {}--{}\n".format(orgDate(comp_start), orgDate(comp_end - timedelta(days=1))))
+                org_lines.append("  {}--{}\n".format(orgDate(comp_start), orgDate(comp_end - timedelta(days=1))))
             if 'DESCRIPTION' in comp:
                 DESCRIPTION = '\n'.join(comp['DESCRIPTION'].to_ical().split('\\n'))
                 DESCRIPTION = DESCRIPTION.replace('\\,', ',')
-                fh_w.write("{}\n".format(DESCRIPTION))
+                org_lines.append(" {}\n".format(DESCRIPTION))
 
-            fh_w.write("\n")
-    except:
-        pass
-exit(0);
+            org_lines.append("\n")
+
+    return org_lines
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        fh = sys.stdin
+    else:
+        fh = open(sys.argv[1],'rb')
+
+    if len(sys.argv) > 2:
+        fh_w = open(sys.argv[2],'wb')
+    else:
+        fh_w = sys.stdout
+
+    org_lines = convert_ical(fh.read())
+
+    fh_w.write(''.join(org_lines))
+
+    exit(0);

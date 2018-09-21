@@ -7,6 +7,9 @@ from datetime import date, datetime, timedelta, tzinfo
 import icalendar as ical
 from pytz import timezone, utc
 
+# Default attendee: for checkout status of the participant.
+DEFAULT_ATTENDEE = "jwpalmieri@gmail.com"
+
 # Default local timezone. The "VTIMEZONE" section of the calendar will
 # update this entry.
 LOCAL_TZ = timezone("America/Los_Angeles")
@@ -254,21 +257,43 @@ def convert_ical(ics):
     start = now - timedelta( days = WINDOW)
     end = now + timedelta( days = WINDOW)
 
+    # Set default attendee
+    attendee = "mailto:" + DEFAULT_ATTENDEE
     for comp in cal.walk():
+        if isinstance(comp, ical.Calendar):
+            calendar_name = comp["X-WR-CALNAME"]
+            if "@" in calendar_name:
+                attendee = "mailto:" + calendar_name
+                print("Changed attendee to {}".format(attendee), file=sys.stderr)
+            continue
+
         # Set the default timezone.
         if isinstance(comp, ical.Timezone):
             global LOCAL_TZ
             LOCAL_TZ = timezone(comp["TZID"])
             continue
 
+        # Check the attendee list -- if the attendee has declined
+        # the event then mark it so.
+        is_attending = True
+        if "ATTENDEE" in comp:
+            for event_attendee in comp["ATTENDEE"]:
+                if event_attendee == attendee and \
+                   event_attendee.params['partstat'] == "DECLINED":
+                    is_attending = False
+                    break
+
         event_iter = generate_event_iterator(comp, start, end)
         for comp_start, comp_end, rec_event in event_iter:
+
             SUMMARY = ""
             if "SUMMARY" in comp:
                 SUMMARY = comp['SUMMARY'].to_ical()
                 SUMMARY = SUMMARY.replace('\\,', ',')
             if not len(SUMMARY):
                 SUMMARY = "(No title)"
+            if not is_attending:
+                SUMMARY = "Declined: {}".format(SUMMARY)
             org_lines.append("* {}".format(SUMMARY))
             if rec_event and len(RECUR_TAG):
                 org_lines.append(" {}\n".format(RECUR_TAG))

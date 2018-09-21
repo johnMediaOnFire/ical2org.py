@@ -9,7 +9,7 @@ from pytz import timezone, utc
 
 # Default local timezone. The "VTIMEZONE" section of the calendar will
 # update this entry.
-LOCAL_TZ = timezone("Europe/Paris")
+LOCAL_TZ = timezone("America/Los_Angeles")
 
 # Window length in days (left & right from current time). Has to be positive.
 WINDOW = 90

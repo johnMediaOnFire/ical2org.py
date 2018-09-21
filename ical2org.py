@@ -129,7 +129,7 @@ class EventRecurDaysIter:
             self.day_list = [0, 1, 2, 3, 4, 5, 6]
             delta_days = 7
         else:
-            self.day_list = self.ev_start.weekday()
+            self.day_list = [self.ev_start.weekday()]
             delta_days = 1
 
         if 'COUNT' in comp['RRULE']:

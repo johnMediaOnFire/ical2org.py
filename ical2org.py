@@ -99,7 +99,7 @@ class EventSingleIter:
         return self
 
     # Iterate just once
-    def next(self):
+    def __next__(self):
         if self.result:
             aux = self.result
             self.result = ()
@@ -182,7 +182,7 @@ class EventRecurDaysIter:
         self.current = add_delta_dst(self.current, self.delta)
         return (event_aux, event_aux.tzinfo.normalize(event_aux + self.duration), 1)
 
-    def next(self):
+    def __next__(self):
         if self.is_count: return self.next_count()
         return self.next_until()
 
@@ -225,14 +225,14 @@ class EventRecurYearlyIter:
     def __iter__(self):
         return self
 
-    def next(self):
+    def __next__(self):
         if self.i >= self.n: raise StopIteration
         event_aux = self.ev_start.replace(year = self.years[self.i])
         event_aux = event_aux.replace(month = self.bymonth)
         event_aux = event_aux.replace(day = self.bymonthday)
         self.i = self.i + 1;
         if event_aux > self.end: raise StopIteration
-        if event_aux < self.start: return self.next()
+        if event_aux < self.start: return self.__next__()
         return (event_aux, event_aux.tzinfo.normalize(event_aux + self.duration), 1)
 
 def convert_ical(ics):
@@ -261,11 +261,12 @@ def convert_ical(ics):
     attendee = "mailto:" + DEFAULT_ATTENDEE
     for comp in cal.walk():
         if isinstance(comp, ical.Calendar):
-            calendar_name = comp["X-WR-CALNAME"]
-            if "@" in calendar_name:
-                attendee = "mailto:" + calendar_name
-                print("Changed attendee to {}".format(attendee), file=sys.stderr)
-            continue
+            if "X-WR-CALNAME" in comp:
+                calendar_name = comp["X-WR-CALNAME"]
+                if "@" in calendar_name:
+                    attendee = "mailto:" + calendar_name
+                    print("Changed attendee to {}".format(attendee), file=sys.stderr)
+                continue
 
         # Set the default timezone.
         if isinstance(comp, ical.Timezone):
@@ -285,10 +286,9 @@ def convert_ical(ics):
 
         event_iter = generate_event_iterator(comp, start, end)
         for comp_start, comp_end, rec_event in event_iter:
-
             SUMMARY = ""
             if "SUMMARY" in comp:
-                SUMMARY = comp['SUMMARY'].to_ical()
+                SUMMARY = comp['SUMMARY'].to_ical().decode("UTF-8")
                 SUMMARY = SUMMARY.replace('\\,', ',')
             if not len(SUMMARY):
                 SUMMARY = "(No title)"
@@ -303,7 +303,7 @@ def convert_ical(ics):
             else:  # all day event
                 org_lines.append("  {}--{}\n".format(orgDate(comp_start), orgDate(comp_end - timedelta(days=1))))
             if 'DESCRIPTION' in comp:
-                DESCRIPTION = '\n'.join(comp['DESCRIPTION'].to_ical().split('\\n'))
+                DESCRIPTION = '\n'.join(comp['DESCRIPTION'].to_ical().decode("UTF-8").split('\\n'))
                 DESCRIPTION = DESCRIPTION.replace('\\,', ',')
                 org_lines.append(" {}\n".format(DESCRIPTION))
 

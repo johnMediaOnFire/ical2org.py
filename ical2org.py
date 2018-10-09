@@ -297,7 +297,12 @@ def convert_ical(ics):
                 org_lines.append(" {}\n".format(RECUR_TAG))
             org_lines.append("\n")
             if isinstance(comp["DTSTART"].dt, datetime):
-                org_lines.append("  {}--{}\n".format(orgDatetime(comp_start), orgDatetime(comp_end)))
+                ev_start = orgDatetime(comp_start)
+                ev_end = orgDatetime(comp_end)
+                if ev_start != ev_end:
+                    org_lines.append("  {}--{}\n".format(ev_start, ev_end))
+                else:
+                    org_lines.append("  {}\n".format(ev_start))
             else:  # all day event
                 org_lines.append("  {}--{}\n".format(orgDate(comp_start), orgDate(comp_end - timedelta(days=1))))
             if 'DESCRIPTION' in comp:

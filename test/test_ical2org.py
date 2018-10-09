@@ -107,7 +107,7 @@ SUMMARY:Event 1
         org_lines = ical2org.convert_ical(ics_string)
 
         self.assertEqual(org_lines[2].strip(),
-                         "<2016-10-22 Sat 16:00>--<2016-10-22 Sat 16:00>")
+                         "<2016-10-22 Sat 16:00>")
 
     @freeze_time("2016-10-22 19:00:00")
     def test_default_timezone(self):

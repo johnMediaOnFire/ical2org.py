@@ -266,13 +266,11 @@ def convert_ical(ics):
                 if "@" in calendar_name:
                     attendee = "mailto:" + calendar_name
                     print("Changed attendee to {}".format(attendee), file=sys.stderr)
-                continue
 
-        # Set the default timezone.
-        if isinstance(comp, ical.Timezone):
-            global LOCAL_TZ
-            LOCAL_TZ = timezone(comp["TZID"])
-            continue
+            # Set the default timezone.
+            if "X-WR-TIMEZONE" in comp:
+                global LOCAL_TZ
+                LOCAL_TZ = timezone(comp["X-WR-TIMEZONE"])
 
         # Check the attendee list -- if the attendee has declined
         # the event then mark it so.

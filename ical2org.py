@@ -1,17 +1,17 @@
 #!/usr/bin/env python
 
-from __future__ import print_function
-import sys
 from math import floor
 from datetime import date, datetime, timedelta, tzinfo
 import icalendar as ical
+import os
 from pytz import timezone, utc
+import sys
 
 # Default attendee: for checkout status of the participant.
 DEFAULT_ATTENDEE = "jwpalmieri@gmail.com"
 
-# Default local timezone. The "VTIMEZONE" section of the calendar will
-# update this entry.
+# Default local timezone. This needs to follow what timezone emacs is
+# in.
 LOCAL_TZ = timezone("America/Los_Angeles")
 
 # Window length in days (left & right from current time). Has to be positive.
@@ -245,6 +245,14 @@ def convert_ical(ics):
     - org -- org-mode text.
 
     """
+    # set the default timezone based on emacs
+    if os.path.exists("timezone"):
+        with open("timezone", "r") as f:
+            tz = f.read().strip()
+            print("Timezone from emacs: '{}'".format(tz), file=sys.stderr)
+            global LOCAL_TZ
+            LOCAL_TZ = timezone(tz)
+
     try:
         cal = ical.Calendar.from_ical(ics)
     except Exception as e:
@@ -266,11 +274,6 @@ def convert_ical(ics):
                 if "@" in calendar_name:
                     attendee = "mailto:" + calendar_name
                     print("Changed attendee to {}".format(attendee), file=sys.stderr)
-
-            # Set the default timezone.
-            if "X-WR-TIMEZONE" in comp:
-                global LOCAL_TZ
-                LOCAL_TZ = timezone(comp["X-WR-TIMEZONE"])
 
         # Check the attendee list -- if the attendee has declined
         # the event then mark it so.

@@ -64,36 +64,12 @@ END:VEVENT
 END:VCALENDAR
 """
 
-    def current_datetime(self, timezone):
-        """Generate the datetime object and dates for now.
-        """
-        dt = datetime.datetime.now(tz = pytz.timezone(timezone))
-        return {
-            "COMPACT": dt.strftime("%Y%m%d"),
-            "DASHED": dt.strftime("%Y-%m-%d"),
-            "datetime": dt,
-            "DOW": dt.strftime("%a")
-        }
-
-    def earliest_datetime(self, timezone):
-        """Since the code only looks back a specific period, find the earliest
-        date it will generate.
-        """
-        dt = datetime.datetime.now(tz = pytz.timezone(timezone)) - datetime.timedelta(days = WINDOW)
-        return {
-            "COMPACT": dt.strftime("%Y%m%d"),
-            "DASHED": dt.strftime("%Y-%m-%d"),
-            "datetime": dt,
-            "DOW": dt.strftime("%a")
-        }
-
     @freeze_time("2016-10-22 19:00:00")
     def test_zero_duration_event(self):
         """When the start and end times are the same, the "DTEND" line is not
         included.
         """
-        ics_string = self.ics_string_tpl.format(timezone = "America/Los_Angeles",
-                                                event = """\
+        ics_string = self.ics_string_tpl.format(event = """\
 DTSTART:20161022T230000Z
 DTSTAMP:20160904T144133Z
 CREATED:20160903T055100Z
@@ -115,8 +91,7 @@ SUMMARY:Event 1
         not specified.
 
         """
-        ics_string = self.ics_string_tpl.format(timezone = "America/Los_Angeles",
-                                                event = """\
+        ics_string = self.ics_string_tpl.format(event = """\
 DTSTART:20161022T190000Z
 DTEND:20161022T200000Z
 DTSTAMP:20160904T144133Z
@@ -138,7 +113,6 @@ SUMMARY:Event 1
         """The event time will use a specified timezone.
         """
         ics_string = self.ics_string_tpl.format(
-            timezone = "America/Los_Angeles",
             event = """\
 DTSTART;TZID=Europe/Paris:20161022T230000Z
 DTEND;TZID=Europe/Paris:20161023T020000Z
@@ -161,8 +135,7 @@ SUMMARY:Event 1
         """When specific days are set for weekly recurring events, only events
         for the specified days will be generated.
         """
-        ics_string = self.ics_string_tpl.format(timezone = "America/Los_Angeles",
-                                                event = """
+        ics_string = self.ics_string_tpl.format(event = """
 DTSTART;TZID=America/Los_Angeles:20161117T100000
 DTEND;TZID=America/Los_Angeles:20161117T101500
 RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR
@@ -203,8 +176,7 @@ SUMMARY:Event 1
         """A single event with Z dates will show up at the correct time in the
         calendar.
         """
-        ics_string = self.ics_string_tpl.format(timezone = "America/Los_Angeles",
-                                                event = """\
+        ics_string = self.ics_string_tpl.format(event = """\
 DTSTART:20181008T020000Z
 DTEND:20181008T022000Z
 DTSTAMP:20181008T121345Z
@@ -227,3 +199,24 @@ END:VALARM
 
         self.assertEqual(org_lines[2].strip(),
                          "<2018-10-07 Sun 19:00>--<2018-10-07 Sun 19:20>")
+
+    def test_timzone_offset(self):
+        """This event shows up an hour later than it is.
+        """
+
+        ics_string = self.ics_string_tpl.format(event = """\
+CREATED:20171109T045108Z
+UID:B91CC1E3-34AA-4ACC-A45F-D54A4FEE92C3
+DTEND:20181009T034700Z
+TRANSP:TRANSPARENT
+X-APPLE-TRAVEL-ADVISORY-BEHAVIOR:AUTOMATIC
+SUMMARY:⚫ New Moon
+DTSTART:20181009T034700Z
+DTSTAMP:20141228T213726Z
+CATEGORIES:Moon,New Moon
+SEQUENCE:0
+URL;VALUE=URI:http://en.wikipedia.org/wiki/Moon_phases
+""")
+        org_lines = ical2org.convert_ical(ics_string)
+
+        self.assertEqual(org_lines[2].strip(), "<2018-10-08 Mon 20:47>")

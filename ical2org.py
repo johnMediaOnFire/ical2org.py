@@ -11,14 +11,15 @@ import sys
 DEFAULT_ATTENDEE = "jwpalmieri@gmail.com"
 
 # Default local timezone. This needs to follow what timezone emacs is
-# in.
+# in. Or you can pull it from a file.
 LOCAL_TZ = timezone("America/Los_Angeles")
+TIMEZONE_FILE = "~/tmp/calendar/timezone"
 
 # Window length in days (left & right from current time). Has to be positive.
 WINDOW = 90
 
 # leave empty if you don't want to attach any tag to recurring events
-RECUR_TAG = ":RECURRING:"
+RECUR_TAG = "" #":RECURRING::"
 
 # Do not change anything below
 
@@ -109,14 +110,6 @@ class EventSingleIter:
 
 class EventRecurDaysIter:
     '''Iterator for daily-based recurring events (daily, weekly).'''
-    day_num = dict( MO = 0,
-                    TU = 1,
-                    WE = 2,
-                    TH = 3,
-                    FR = 4,
-                    SA = 5,
-                    SU = 6)
-
     def __init__(self, days, comp, timeframe_start, timeframe_end):
         self.ev_start = get_datetime(comp['DTSTART'].dt)
 
@@ -126,7 +119,8 @@ class EventRecurDaysIter:
         self.day_list = list()
 
         if 'BYDAY' in comp['RRULE']:
-            self.day_list = [ self.day_num[day_name] for day_name in comp['RRULE']['BYDAY'] ]
+            day_num = self.set_day_num(comp['RRULE'])
+            self.day_list = [ day_num[day_name] for day_name in comp['RRULE']['BYDAY'] ]
             delta_days = 1
         elif comp['RRULE']['FREQ'][0] == 'WEEKLY':
             self.day_list = [0, 1, 2, 3, 4, 5, 6]
@@ -180,11 +174,41 @@ class EventRecurDaysIter:
         self.count -= 1
         event_aux = self.current
         self.current = add_delta_dst(self.current, self.delta)
+        while self.current.weekday() not in self.day_list:
+            self.current = add_delta_dst(self.current, self.delta)
         return (event_aux, event_aux.tzinfo.normalize(event_aux + self.duration), 1)
 
     def __next__(self):
         if self.is_count: return self.next_count()
         return self.next_until()
+
+    def set_day_num(self, rrule):
+        """The week may start on a different day for each RRULE, so number the
+        days accordingly.
+
+        Arguments:
+        - rrule -- RRULE line.
+
+        Returns:
+        - day_num -- dict of day tags to day number.
+        """
+        # comp['RRULE']['WKST']
+        day_tags = ['MO', 'TU', 'WE', 'TH', 'FR', 'SA', 'SU']
+
+        wkst_s = 'MO' #rrule.get('WKST', ['MO'])[0]
+        n = 0
+        for i, tag in enumerate(day_tags):
+            if tag == wkst_s:
+                n = i
+                break
+
+        day_num = dict()
+        for i in range(7):
+            day_num[day_tags[n]] = i
+            n = (n + 1) % 7
+
+        return day_num
+
 
 class EventRecurMonthlyIter:
     pass
@@ -245,11 +269,10 @@ def convert_ical(ics):
     - org -- org-mode text.
 
     """
-    # set the default timezone based on emacs
-    if os.path.exists("timezone"):
-        with open("timezone", "r") as f:
+    # Set the default timezone based on a file.
+    if os.path.exists(TIMEZONE_FILE):
+        with open(TIMEZONE_FILE, "r") as f:
             tz = f.read().strip()
-            print("Timezone from emacs: '{}'".format(tz), file=sys.stderr)
             global LOCAL_TZ
             LOCAL_TZ = timezone(tz)
 
@@ -273,7 +296,7 @@ def convert_ical(ics):
                 calendar_name = comp["X-WR-CALNAME"]
                 if "@" in calendar_name:
                     attendee = "mailto:" + calendar_name
-                    print("Changed attendee to {}".format(attendee), file=sys.stderr)
+                    # print("Changed attendee to {}".format(attendee), file=sys.stderr)
 
         # Check the attendee list -- if the attendee has declined
         # the event then mark it so.
@@ -297,21 +320,32 @@ def convert_ical(ics):
                 SUMMARY = "Declined: {}".format(SUMMARY)
             org_lines.append("* {}".format(SUMMARY))
             if rec_event and len(RECUR_TAG):
-                org_lines.append(" {}\n".format(RECUR_TAG))
+                org_lines.append("{}\n".format(RECUR_TAG))
             org_lines.append("\n")
             if isinstance(comp["DTSTART"].dt, datetime):
                 ev_start = orgDatetime(comp_start)
                 ev_end = orgDatetime(comp_end)
                 if ev_start != ev_end:
-                    org_lines.append("  {}--{}\n".format(ev_start, ev_end))
+                    org_lines.append("{}--{}\n".format(ev_start, ev_end))
                 else:
-                    org_lines.append("  {}\n".format(ev_start))
+                    org_lines.append("{}\n".format(ev_start))
             else:  # all day event
-                org_lines.append("  {}--{}\n".format(orgDate(comp_start), orgDate(comp_end - timedelta(days=1))))
+                org_lines.append("{}--{}\n".format(orgDate(comp_start), orgDate(comp_end - timedelta(days=1))))
+
+            org_lines.append("\n")
+
             if 'DESCRIPTION' in comp:
-                DESCRIPTION = '\n'.join(comp['DESCRIPTION'].to_ical().decode("UTF-8").split('\\n'))
-                DESCRIPTION = DESCRIPTION.replace('\\,', ',')
-                org_lines.append(" {}\n".format(DESCRIPTION))
+                description = '\n'.join(comp['DESCRIPTION'].to_ical().decode("UTF-8").split('\\n'))
+                description = description.replace('\\,', ',')
+                if len(description) > 0:
+                    org_lines.append("- {}\n".format(description))
+            if 'LOCATION' in comp:
+                location = '\n'.join(comp['LOCATION'].to_ical().decode("UTF-8").split('\\n'))
+                location = location.replace('\\,', ',')
+                if location.startswith('http'):
+                    org_lines.append("- [[{}]]\n".format(location))
+                elif len(location) > 0:
+                    org_lines.append("- {}\n".format(location))
 
             org_lines.append("\n")
 
@@ -332,4 +366,4 @@ if __name__ == "__main__":
 
     fh_w.write(''.join(org_lines))
 
-    exit(0);
+    exit(0)
